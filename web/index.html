@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timegrapher</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #2a313c; --text: #e6edf3; --muted: #8b949e;
+    --accent: #f2b84b; --even: #4cc2ff; --odd: #ff7a90; --good: #3fb950; --warn: #d29922; --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); display: inline-block; margin-right: 6px; }
+  .status { color: var(--muted); font-size: 13px; }
+  .spacer { flex: 1; }
+  main { max-width: 1100px; margin: 0 auto; padding: 12px 16px 40px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .readouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .ro { min-width: 0; }
+  .ro .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .8px; }
+  .ro .value { font: 600 34px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .ro .unit { font-size: 14px; color: var(--muted); margin-left: 4px; font-weight: 400; }
+  .ro .sub { color: var(--muted); font-size: 12px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
+  canvas { width: 100%; display: block; border-radius: 6px; background: #0a0d12; }
+  #trace { height: 340px; }
+  #wave { height: 150px; }
+  #hist { height: 150px; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 14px; }
+  label.ctl { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+  select, input, button { font: inherit; color: var(--text); background: #0d1117; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+  input[type=range] { padding: 0; accent-color: var(--accent); }
+  button { cursor: pointer; background: #21262d; }
+  button.primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .meter { height: 8px; width: 120px; background: #0a0d12; border-radius: 4px; overflow: hidden; position: relative; }
+  .meter > div { position: absolute; top: 0; bottom: 0; left: 0; background: var(--good); }
+  .meter > i { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  #simPanel { display: none; }
+  @media (max-width: 760px) {
+    .readouts { grid-template-columns: repeat(2, 1fr); }
+    .grid2 { grid-template-columns: minmax(0, 1fr); }
+    #levelText { font-size: 11px; }
+    th, td { padding: 5px 3px; font-size: 12px; }
+    .ro .value { font-size: 28px; }
+    #trace { height: 280px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Timegrapher</h1>
+  <span class="status"><span class="dot" id="dot"></span><span id="conn">Connecting…</span></span>
+  <button class="primary" id="connectBtn" style="display:none">Connect Pico</button>
+  <span class="spacer"></span>
+  <span class="status" id="levelText">—</span>
+  <div class="meter" title="Signal peak (bar) vs trigger threshold (line)"><div id="meterBar"></div><i id="meterThr"></i></div>
+</header>
+
+<main>
+  <section class="panel readouts">
+    <div class="ro"><div class="label">Rate</div><div class="value" id="rate">—<span class="unit">s/d</span></div><div class="sub" id="rateSub">&nbsp;</div></div>
+    <div class="ro"><div class="label">Amplitude</div><div class="value" id="amp">—<span class="unit">°</span></div><div class="sub" id="ampSub">&nbsp;</div></div>
+    <div class="ro"><div class="label">Beat error</div><div class="value" id="be">—<span class="unit">ms</span></div><div class="sub" id="beSub">&nbsp;</div></div>
+    <div class="ro"><div class="label">Beat rate</div><div class="value" id="bph">—<span class="unit">bph</span></div><div class="sub" id="bphSub">&nbsp;</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Trace</h2>
+    <canvas id="trace"></canvas>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--even)"></span>tick</span>
+      <span><span class="sw" style="background:var(--odd)"></span>tock</span>
+      <span>Lines lean right when the watch runs fast; the gap between them is beat error.</span>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Last tick</h2>
+      <canvas id="wave"></canvas>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--accent)"></span>envelope</span>
+        <span><span class="sw" style="background:var(--even)"></span>unlock (A)</span>
+        <span><span class="sw" style="background:var(--odd)"></span>drop (C)</span>
+        <span><span class="sw" style="background:var(--muted)"></span>threshold</span>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Rate history</h2>
+      <canvas id="hist"></canvas>
+      <div class="legend" id="histLegend">&nbsp;</div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Settings</h2>
+    <div class="controls">
+      <label class="ctl">Beat rate
+        <select id="bphSel"><option value="0">Auto</option></select>
+      </label>
+      <label class="ctl">Lift angle (°)
+        <input id="lift" type="number" min="30" max="70" step="1" value="52">
+      </label>
+      <label class="ctl">Averaging window
+        <select id="win"><option value="10">10 s</option><option value="20" selected>20 s</option><option value="60">60 s</option><option value="120">2 min</option></select>
+      </label>
+      <label class="ctl">Trace width
+        <select id="zoom"><option value="2">±1 ms</option><option value="5">±2.5 ms</option><option value="10" selected>±5 ms</option><option value="20">±10 ms</option><option value="50">±25 ms</option></select>
+      </label>
+      <label class="ctl">Sensitivity <span id="sensVal"></span>
+        <input id="sens" type="range" min="2" max="30" step="0.5" value="6">
+      </label>
+      <label class="ctl">High-pass filter
+        <select id="hpf"><option>500</option><option>1000</option><option selected>2000</option><option>3000</option><option>5000</option></select>
+      </label>
+      <label class="ctl">Clock correction (ppm)
+        <input id="ppm" type="number" step="0.1" value="0">
+      </label>
+      <label class="ctl">&nbsp;
+        <button id="reset">Reset measurement</button>
+      </label>
+    </div>
+    <p class="hint">Sensitivity is the threshold above the noise floor: lower values catch quieter ticks, higher values ignore room noise.
+      Clock correction compensates for the board's crystal error: if a known-perfect reference reads +X s/d, enter −X × 11.57.</p>
+  </section>
+
+  <section class="panel" id="simPanel">
+    <h2>Simulator</h2>
+    <div class="controls">
+      <label class="ctl">BPH <select id="simBph"></select></label>
+      <label class="ctl">Rate (s/d) <input id="simRate" type="number" step="1" value="5"></label>
+      <label class="ctl">Beat error (ms) <input id="simBe" type="number" step="0.1" value="0.6"></label>
+      <label class="ctl">Amplitude (°) <input id="simAmp" type="number" step="5" value="275"></label>
+      <label class="ctl">Noise <input id="simNoise" type="range" min="0" max="0.006" step="0.0002" value="0.0004"></label>
+    </div>
+    <p class="hint">No device connected, so a synthetic watch is running through the same detection code as the firmware. Plug in the Pico and press <b>Connect Pico</b> (Chrome or Edge).</p>
+  </section>
+
+  <section class="panel">
+    <h2>Positions</h2>
+    <div class="row">
+      <select id="pos">
+        <option>Dial up</option><option>Dial down</option><option>Crown up</option>
+        <option>Crown down</option><option>Crown left</option><option>Crown right</option>
+      </select>
+      <button class="primary" id="save">Save reading</button>
+      <button id="clearPos">Clear</button>
+    </div>
+    <table style="margin-top:10px">
+      <thead><tr><th>Position</th><th>Rate s/d</th><th>Amp °</th><th>Beat err ms</th><th>BPH</th><th>Time</th></tr></thead>
+      <tbody id="posBody"></tbody>
+      <tfoot id="posFoot"></tfoot>
+    </table>
+  </section>
+</main>
+
+<script src="analysis.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const C = { even: css('--even'), odd: css('--odd'), accent: css('--accent'), muted: css('--muted'), line: css('--line'), text: css('--text') };
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('tg.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('tg.' + k, JSON.stringify(v)); } catch (e) {} },
+  };
+
+  for (const b of TG.STANDARD_BPH) {
+    $('bphSel').add(new Option(b.toLocaleString(), b));
+    $('simBph').add(new Option(b.toLocaleString(), b));
+  }
+  $('simBph').value = 28800;
+
+  // ---------------------------------------------------------------- settings
+  const settingIds = ['bphSel', 'lift', 'win', 'zoom', 'sens', 'hpf', 'ppm'];
+  const saved = store.get('settings', {});
+  for (const id of settingIds) if (saved[id] != null) $(id).value = saved[id];
+  const num = id => parseFloat($(id).value);
+
+  const ana = new TG.Analyzer({ liftAngle: num('lift'), bph: num('bphSel'), ppm: num('ppm') || 0, windowSec: num('win') });
+  let lastStats = null, dirty = true;
+
+  function deviceConfig() {
+    const T = ana.period;
+    return { sens: num('sens'), hpf: num('hpf'), refractoryMs: T ? Math.max(30, T * 600) : 40 };
+  }
+  function onSettings() {
+    const s = {};
+    for (const id of settingIds) s[id] = $(id).value;
+    store.set('settings', s);
+    $('sensVal').textContent = '×' + num('sens');
+    ana.setOptions({ liftAngle: num('lift'), bph: num('bphSel'), ppm: num('ppm') || 0, windowSec: num('win') });
+    source.configure(deviceConfig());
+    dirty = true;
+  }
+  for (const id of settingIds) $(id).addEventListener('change', onSettings);
+  $('sens').addEventListener('input', () => { $('sensVal').textContent = '×' + num('sens'); });
+  $('reset').onclick = () => { ana.reset(); dirty = true; };
+
+  // ---------------------------------------------------------------- tick input
+  let lastBph = 0;
+  function onTick(tick) {
+    ana.addTick(tick);
+    if (ana.bph !== lastBph) { lastBph = ana.bph; source.configure(deviceConfig()); }
+    dirty = true;
+  }
+
+  // ---------------------------------------------------------------- sources
+  // Each source feeds onTick()/onStats() and exposes configure(cfg) and stop().
+  let source = { configure() {}, stop() {} };
+  function switchSource(s) { source.stop(); source = s; ana.reset(); source.configure(deviceConfig()); dirty = true; }
+
+  function onStats(m) {
+    lastStats = m;
+    // the Pico reports its exact I2S rate (not quite 48 kHz); restart if it changes
+    if (m.fs && Math.abs(m.fs - ana.opts.fs) > 1e-6) { ana.opts.fs = m.fs; ana.reset(); }
+    dirty = true;
+  }
+
+  function wsSource() {
+    let ws = null, cfg = null, timer = null;
+    function connect() {
+      setConn('Connecting…', 'var(--warn)');
+      ws = new WebSocket(`ws://${location.host}/ws`);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => { setConn('Live', 'var(--good)'); if (cfg) ws.send(JSON.stringify(cfg)); };
+      ws.onmessage = ev => {
+        if (typeof ev.data === 'string') {
+          try { const m = JSON.parse(ev.data); if (m.t === 'stats') onStats(m); } catch (e) {}
+        } else {
+          const t = TG.decodeTick(ev.data);
+          if (t) onTick(t);
+        }
+      };
+      ws.onclose = () => { setConn('Disconnected, retrying…', 'var(--bad)'); clearTimeout(timer); timer = setTimeout(connect, 1500); };
+      ws.onerror = () => ws.close();
+    }
+    connect();
+    return {
+      configure(c) { cfg = c; if (ws && ws.readyState === 1) ws.send(JSON.stringify(c)); },
+      stop() {},
+    };
+  }
+
+  // Pico over USB (Web Serial). The port is opened by the caller.
+  function serialSource(port) {
+    const fp = new TG.FrameParser(), enc = new TextEncoder(), dec = new TextDecoder();
+    let reader = null, stopped = false, writes = Promise.resolve();
+    setConn('Pico · live', 'var(--good)');
+    showConnect(false);
+    (async () => {
+      try {
+        while (port.readable && !stopped) {
+          reader = port.readable.getReader();
+          try {
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              for (const f of fp.push(value)) {
+                if (f.type === 1) { const t = TG.decodeTick(f.payload); if (t) onTick(t); }
+                else if (f.type === 2) { try { onStats(JSON.parse(dec.decode(f.payload))); } catch (e) {} }
+              }
+            }
+          } finally { reader.releaseLock(); }
+        }
+      } catch (e) { /* unplugged */ }
+      try { await port.close(); } catch (e) {}
+      if (!stopped) { setConn('Pico disconnected', 'var(--bad)'); showConnect(true); }
+    })();
+    return {
+      configure(c) {
+        writes = writes.then(async () => {
+          if (!port.writable) return;
+          const w = port.writable.getWriter();
+          try { await w.write(enc.encode(JSON.stringify(c) + '\n')); } finally { w.releaseLock(); }
+        }).catch(() => {});
+      },
+      stop() { stopped = true; if (reader) reader.cancel().catch(() => {}); },
+    };
+  }
+
+  async function openPico(port) {
+    try {
+      await port.open({ baudRate: 115200, bufferSize: 1 << 16 });
+      try { await port.setSignals({ dataTerminalReady: true }); } catch (e) {}
+      $('simPanel').style.display = 'none';
+      switchSource(serialSource(port));
+    } catch (e) {
+      setConn('Could not open the Pico: ' + e.message, 'var(--bad)');
+    }
+  }
+
+  function simSource() {
+    $('simPanel').style.display = 'block';
+    setConn('Simulator', 'var(--accent)');
+    const simIds = ['simBph', 'simRate', 'simBe', 'simAmp', 'simNoise'];
+    const simOpts = () => ({ bph: num('simBph'), rate: num('simRate'), beatErrorMs: num('simBe'), amplitude: num('simAmp'), noise: num('simNoise') });
+    const watch = new TG.SyntheticWatch(simOpts());
+    const det = new TG.Detector(48000);
+    for (const id of simIds) $(id).addEventListener('input', () => watch.set(simOpts()));
+    let tPrev = performance.now(), peak = 0, n50 = 0;
+    const timer = setInterval(() => {
+      const now = performance.now();
+      const n = Math.min(48000, Math.round((now - tPrev) / 1000 * 48000));
+      tPrev += n / 48;
+      const buf = watch.render(n);
+      for (const t of det.process(buf)) { peak = Math.max(peak, t.peak); onTick(t); }
+      if (++n50 % 10) return;   // report every 500 ms, like the firmware
+      onStats({ fs: 48000, peak, floor: det.floor, thr: Math.max(det.floor * det.cfg.sens, det.cfg.minThr) });
+      peak = 0;
+    }, 50);
+    return { configure(c) { det.setConfig(c); }, stop() { clearInterval(timer); } };
+  }
+
+  function setConn(text, color) { $('conn').textContent = text; $('dot').style.background = color; }
+  function showConnect(on) { $('connectBtn').style.display = on ? '' : 'none'; }
+
+  const params = new URLSearchParams(location.search);
+  const servedByEsp32 = location.protocol === 'http:' && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && !params.has('sim');
+  if (servedByEsp32) {
+    switchSource(wsSource());
+  } else {
+    // Run the simulator until a Pico is connected over USB.
+    switchSource(simSource());
+    if ('serial' in navigator) {
+      showConnect(true);
+      $('connectBtn').onclick = async () => {
+        try { await openPico(await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x2E8A }] })); } catch (e) {}
+      };
+      // reconnect automatically to a Pico this page was given access to before
+      navigator.serial.getPorts().then(ports => { if (ports.length && !params.has('sim')) openPico(ports[0]); });
+      navigator.serial.addEventListener('connect', e => { if ($('connectBtn').style.display !== 'none') openPico(e.target); });
+    } else {
+      $('conn').textContent = 'Simulator (connecting a Pico needs Chrome or Edge)';
+    }
+  }
+  onSettings();
+
+  // ---------------------------------------------------------------- canvas helpers
+  function fit(cv) {
+    const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { g, w: r.width, h: r.height };
+  }
+  const fmt = (v, d, sign) => v == null || !isFinite(v) ? '—' : (sign && v > 0 ? '+' : '') + v.toFixed(d);
+  const dB = v => v > 0 ? 20 * Math.log10(v) : -120;
+
+  // ---------------------------------------------------------------- drawing
+  function drawReadouts() {
+    const r = ana.result;
+    $('rate').firstChild.textContent = r ? fmt(r.rate, 1, true) : '—';
+    $('amp').firstChild.textContent = r && r.amp ? fmt(r.amp, 0) : '—';
+    $('be').firstChild.textContent = r ? fmt(r.beatError, 1) : '—';
+    $('bph').firstChild.textContent = ana.bph ? ana.bph.toLocaleString() : '—';
+    $('rateSub').textContent = r ? `σ ${r.jitterMs.toFixed(2)} ms · ${r.count} beats / ${r.span.toFixed(0)} s` : (ana.bph ? 'collecting…' : 'listening…');
+    $('ampSub').textContent = r && r.ampEven && r.ampOdd ? `tick ${r.ampEven.toFixed(0)}° · tock ${r.ampOdd.toFixed(0)}° · lift ${ana.opts.liftAngle}°` : `lift ${ana.opts.liftAngle}°`;
+    $('beSub').textContent = r ? (r.beatError < 0.6 ? 'good' : r.beatError < 1.5 ? 'acceptable' : 'needs adjustment') : ' ';
+    $('bphSub').textContent = num('bphSel') ? 'manual' : (ana.bph ? 'auto-detected' : 'detecting…');
+    $('rate').style.color = r ? (Math.abs(r.rate) <= 10 ? 'var(--good)' : Math.abs(r.rate) <= 30 ? 'var(--warn)' : 'var(--bad)') : '';
+
+    if (lastStats) {
+      const p = dB(lastStats.peak), f = dB(lastStats.floor), t = dB(lastStats.thr);
+      $('levelText').textContent = `peak ${p.toFixed(0)} dBFS · noise ${f.toFixed(0)} · SNR ${(p - f).toFixed(0)} dB`;
+      const pct = v => Math.max(0, Math.min(100, (v + 100) / 100 * 100));
+      $('meterBar').style.width = pct(p) + '%';
+      $('meterBar').style.background = p > t ? 'var(--good)' : 'var(--bad)';
+      $('meterThr').style.left = pct(t) + '%';
+    }
+  }
+
+  function drawTrace() {
+    const { g, w, h } = fit($('trace'));
+    g.clearRect(0, 0, w, h);
+    const span = num('zoom') / 1000;   // seconds across the full width
+    const rowPx = 2;
+    const rows = Math.floor(h / rowPx);
+    // grid
+    g.strokeStyle = C.line; g.fillStyle = C.muted; g.font = '10px system-ui'; g.lineWidth = 1;
+    for (let i = 0; i <= 10; i++) {
+      const x = Math.round(i / 10 * w) + 0.5;
+      g.globalAlpha = i === 5 ? 0.9 : 0.4;
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke();
+    }
+    g.globalAlpha = 1;
+    g.fillText(`${(-span / 2 * 1000).toFixed(1)} ms`, 4, h - 4);
+    g.textAlign = 'right'; g.fillText(`+${(span / 2 * 1000).toFixed(1)} ms`, w - 4, h - 4); g.textAlign = 'left';
+    const tr = ana.trace;
+    if (!tr.length) {
+      g.fillStyle = C.muted; g.textAlign = 'center'; g.font = '13px system-ui';
+      g.fillText(ana.bph ? 'Waiting for steady ticks…' : 'Place the watch on the microphone', w / 2, h / 2);
+      g.textAlign = 'left';
+      return;
+    }
+    const newest = tr[tr.length - 1].row;
+    const r = 1.6;
+    for (let i = tr.length - 1; i >= 0; i--) {
+      const p = tr[i], age = newest - p.row;
+      if (age > rows) break;
+      let x = ((p.x + span / 2) % span + span) % span;   // wrap into [0, span)
+      const px = x / span * w, py = h - 2 - age * rowPx;
+      g.fillStyle = p.p ? C.odd : C.even;
+      g.fillRect(px - r, py - r, r * 2, r * 2);
+    }
+  }
+
+  function drawWave() {
+    const { g, w, h } = fit($('wave'));
+    g.clearRect(0, 0, w, h);
+    const t = ana.lastTick;
+    if (!t) return;
+    const env = t.env, n = env.length, fs = ana.opts.fs;
+    const X = i => i / (n - 1) * w, Y = v => h - 6 - v * (h - 14);
+    // time grid every 5 ms
+    g.strokeStyle = C.line; g.fillStyle = C.muted; g.font = '10px system-ui';
+    for (let ms = 0; ms * fs / 1000 + t.pre < n; ms += 5) {
+      const x = Math.round(X(t.pre + ms * fs / 1000)) + 0.5;
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke();
+      g.fillText(ms + 'ms', x + 2, 10);
+    }
+    // threshold relative to this tick's peak
+    const thr = t.thr / t.peak;
+    g.strokeStyle = C.muted; g.setLineDash([4, 4]);
+    g.beginPath(); g.moveTo(0, Y(thr)); g.lineTo(w, Y(thr)); g.stroke(); g.setLineDash([]);
+    g.strokeStyle = C.accent; g.lineWidth = 1.2; g.beginPath();
+    const stride = Math.max(1, Math.floor(n / (w * 2)));
+    for (let i = 0; i < n; i += stride) {
+      let v = 0;
+      for (let k = i; k < Math.min(n, i + stride); k++) v = Math.max(v, env[k]);
+      i === 0 ? g.moveTo(X(i), Y(v)) : g.lineTo(X(i), Y(v));
+    }
+    g.stroke(); g.lineWidth = 1;
+    const mark = (idx, col, label) => {
+      if (idx == null) return;
+      g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(X(idx), 0); g.lineTo(X(idx), h); g.stroke();
+      g.fillText(label, X(idx) + 3, h - 6); g.lineWidth = 1;
+    };
+    mark(t.aIdx, C.even, 'A');
+    mark(t.cIdx, C.odd, 'C');
+    if (t.aIdx != null && t.cIdx != null) {
+      g.fillStyle = C.text; g.textAlign = 'right';
+      g.fillText(`A→C ${((t.cIdx - t.aIdx) / fs * 1000).toFixed(2)} ms · ${t.amp.toFixed(0)}°`, w - 4, 22);
+      g.textAlign = 'left';
+    }
+  }
+
+  function drawHist() {
+    const { g, w, h } = fit($('hist'));
+    g.clearRect(0, 0, w, h);
+    const hs = ana.history;
+    if (hs.length < 2) { $('histLegend').textContent = ' '; return; }
+    const t1 = hs[hs.length - 1].t, t0 = Math.max(hs[0].t, t1 - 600);
+    const pts = hs.filter(p => p.t >= t0);
+    let lo = Infinity, hi = -Infinity;
+    for (const p of pts) { lo = Math.min(lo, p.rate); hi = Math.max(hi, p.rate); }
+    const pad = Math.max(2, (hi - lo) * 0.15);
+    lo -= pad; hi += pad;
+    const X = t => (t - t0) / Math.max(1, t1 - t0) * (w - 40) + 36, Y = v => h - 6 - (v - lo) / (hi - lo) * (h - 12);
+    g.fillStyle = C.muted; g.strokeStyle = C.line; g.font = '10px system-ui'; g.textAlign = 'right';
+    for (const v of [lo + pad, (lo + hi) / 2, hi - pad]) {
+      g.beginPath(); g.moveTo(36, Y(v)); g.lineTo(w, Y(v)); g.stroke();
+      g.fillText(v.toFixed(1), 32, Y(v) + 3);
+    }
+    if (lo < 0 && hi > 0) { g.strokeStyle = C.muted; g.beginPath(); g.moveTo(36, Y(0)); g.lineTo(w, Y(0)); g.stroke(); }
+    g.textAlign = 'left';
+    g.strokeStyle = C.accent; g.lineWidth = 1.5; g.beginPath();
+    pts.forEach((p, i) => i ? g.lineTo(X(p.t), Y(p.rate)) : g.moveTo(X(p.t), Y(p.rate)));
+    g.stroke(); g.lineWidth = 1;
+    $('histLegend').textContent = `rate (s/d) over the last ${Math.round(t1 - t0)} s`;
+  }
+
+  function frame() {
+    if (dirty) { dirty = false; drawReadouts(); drawTrace(); drawWave(); drawHist(); }
+    requestAnimationFrame(frame);
+  }
+  window.addEventListener('resize', () => { dirty = true; });
+  requestAnimationFrame(frame);
+
+  // ---------------------------------------------------------------- positions
+  let positions = store.get('positions', []);
+  function renderPositions() {
+    $('posBody').innerHTML = '';
+    for (const p of positions) {
+      const tr = document.createElement('tr');
+      for (const v of [p.pos, fmt(p.rate, 1, true), fmt(p.amp, 0), fmt(p.be, 1), p.bph.toLocaleString(), new Date(p.time).toLocaleTimeString()]) {
+        const td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+      }
+      $('posBody').appendChild(tr);
+    }
+    $('posFoot').innerHTML = '';
+    if (positions.length >= 2) {
+      const rates = positions.map(p => p.rate), amps = positions.map(p => p.amp).filter(a => a != null);
+      const avg = rates.reduce((a, b) => a + b, 0) / rates.length;
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<th>Average · Δ max</th>';
+      for (const v of [`${fmt(avg, 1, true)} · ${(Math.max(...rates) - Math.min(...rates)).toFixed(1)}`,
+        amps.length ? `${fmt(amps.reduce((a, b) => a + b, 0) / amps.length, 0)} · ${(Math.max(...amps) - Math.min(...amps)).toFixed(0)}` : '—', '', '', '']) {
+        const th = document.createElement('th'); th.textContent = v; tr.appendChild(th);
+      }
+      $('posFoot').appendChild(tr);
+    }
+  }
+  $('save').onclick = () => {
+    const r = ana.result;
+    if (!r) return;
+    positions.push({ pos: $('pos').value, rate: r.rate, amp: r.amp, be: r.beatError, bph: r.bph, time: Date.now() });
+    store.set('positions', positions);
+    renderPositions();
+    const sel = $('pos');
+    if (sel.selectedIndex < sel.options.length - 1) sel.selectedIndex++;
+  };
+  $('clearPos').onclick = () => { positions = []; store.set('positions', positions); renderPositions(); };
+  renderPositions();
+})();
+</script>
+</body>
+</html>
