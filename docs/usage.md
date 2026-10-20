@@ -57,8 +57,9 @@ shows how early or late each beat came compared with a perfect clock, in millise
 - **Two parallel lines** mean beat error; the vertical gap between them is the beat error.
   One merged line means zero beat error.
 - **Scattered dots** mean noise or a weak signal. Improve the mic contact.
-- **Wavy lines** can show a real issue, such as a poised balance or escape wheel problem,
-  but check the mounting first.
+- **Wavy lines** can show a real issue. A wave that repeats about once a minute, with
+  amplitude rising and falling in step, points at the seconds (fourth) wheel: wear, dirt or
+  a bent pivot. Faster waves can point at the escape wheel. Check the mounting first.
 
 The view stays centred on the visible dots. **Trace scale** set to *Auto* zooms to fit
 them; a fixed scale wraps dots that run off the top or bottom, like timegrapher paper.
@@ -81,8 +82,9 @@ or for comparing before and after an adjustment.
 | Setting | What it does |
 |---|---|
 | **Beat rate** | *Auto* detects it; pick a value if detection is wrong. Auto can lock onto half the real rate when every second tick is missed. |
-| **Lift angle** | Property of the movement, used only for amplitude. Most modern movements are 50–53° (ETA 2824: 50°, many Seiko: 53°, Miyota 8215: 50°, older ETA/Unitas: 52°). Look up your calibre. A wrong lift angle scales amplitude proportionally. |
-| **Averaging window** | Seconds of beats used for rate and beat error. A longer window is steadier but slower to react. |
+| **Calibre** | Picks the lift angle for common movements. Choose *Custom* to type one. |
+| **Lift angle** | Property of the movement, used only for amplitude. No timegrapher can measure it from sound: amplitude and lift angle are tied together in one equation, so bench machines look it up by calibre too. Most modern movements are 50–53°. A wrong lift angle scales amplitude proportionally. |
+| **Averaging window** | Seconds of beats used for rate and beat error. The default, 60 s, covers one full turn of the seconds wheel, whose small irregularities otherwise make a short-window rate swing up and down. Use 10–20 s while adjusting the regulator, so the reading reacts faster. |
 | **Trace view** | *Dial* (like Watch Accuracy Meter) or *Strip* (scrolling chart). |
 | **Dial range** | Rate at the edges of the dial's fan. |
 | **Trace scale** | Vertical range of the strip view. *Auto* fits the visible dots. |

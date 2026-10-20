@@ -117,11 +117,20 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       <label class="ctl">Beat rate
         <select id="bphSel"><option value="0">Auto</option></select>
       </label>
+      <label class="ctl">Calibre
+        <select id="calibre">
+          <option value="">Custom</option>
+          <option value="53">Seiko NH35 / NH36 / 4R35 / 4R36 / 7S26 (53°)</option>
+          <option value="50">ETA 2824-2 / Sellita SW200 (50°)</option>
+          <option value="50">ETA 2892-A2 (50°)</option>
+          <option value="52">Generic Swiss lever (52°)</option>
+        </select>
+      </label>
       <label class="ctl">Lift angle (°)
         <input id="lift" type="number" min="30" max="70" step="1" value="52">
       </label>
       <label class="ctl">Averaging window
-        <select id="win"><option value="10">10 s</option><option value="20" selected>20 s</option><option value="60">60 s</option><option value="120">2 min</option></select>
+        <select id="win"><option value="10">10 s</option><option value="20">20 s</option><option value="60" selected>60 s</option><option value="120">2 min</option></select>
       </label>
       <label class="ctl">Trace view
         <select id="view"><option value="dial" selected>Dial</option><option value="strip">Strip</option></select>
@@ -460,15 +469,20 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       if (!this.bph) return info;
       const T = this.period;
 
-      // Timing reference is the unlock (A), the first sound of the tick. When
-      // A is too quiet to cross the threshold, the trigger fires on the louder
-      // drop (C) instead; such ticks show their strongest burst right at the
-      // trigger. Learn the usual trigger-to-strongest-burst gap from clean ticks
-      // and offer the shifted-back time as the preferred candidate.
+      // Timing reference is the unlock (A), the first sound of the tick. A quiet
+      // A doesn't always cross the threshold, so the trigger can land on a later
+      // burst (impulse B or drop C). The strongest burst (normally C) is caught
+      // every time, so learn the usual trigger-to-strongest gap from ticks that
+      // did trigger on A, and when a tick's gap is shorter than that, the trigger
+      // was late: place it at (strongest burst - usual gap) instead.
       const so = strongestBurstOffset(tick.env, tick.pre) / this.opts.fs;
-      if (so > 0.003) { this.acGaps.push(so); if (this.acGaps.length > 60) this.acGaps.shift(); }
+      const gap = this.acGaps.length >= 5 ? median(this.acGaps) : null;
+      if (so > 0.003 && (gap == null || Math.abs(so - gap) < 0.0015)) {
+        this.acGaps.push(so);
+        if (this.acGaps.length > 60) this.acGaps.shift();
+      }
       const cands = [tTrig];
-      if (so < 0.0015 && this.acGaps.length >= 5) cands.unshift(tTrig - median(this.acGaps) / (1 + this.opts.ppm * 1e-6));
+      if (gap != null && gap - so > 0.0015) cands.unshift(tTrig - (gap - so) / (1 + this.opts.ppm * 1e-6));
 
       let n, t = cands[0];
       if (!this.run.length) n = 0;
@@ -482,7 +496,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
             // predict this beat from the fit (period, phase, tick/tock offset)
             n = f.n0 + Math.round((c - f.t0 - f.a - f.c / 2) / f.b);
             const pred = f.t0 + f.a + f.b * (n - f.n0) + f.c * (n & 1);
-            const tol = Math.min(0.008, Math.max(0.003, 6 * f.jitterMs / 1000));
+            const tol = Math.min(0.004, Math.max(0.002, 6 * f.jitterMs / 1000));
             ok = n > last.n && Math.abs(c - pred) <= tol;
           } else {
             const r = Math.round((c - last.t) / T);
@@ -635,10 +649,11 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
   $('simBph').value = 28800;
 
   // ---------------------------------------------------------------- settings
-  const settingIds = ['bphSel', 'lift', 'win', 'view', 'dialRange', 'zoom', 'sens', 'hpf', 'ppm'];
+  const settingIds = ['bphSel', 'calibre', 'lift', 'win', 'view', 'dialRange', 'zoom', 'sens', 'hpf', 'ppm'];
   const saved = store.get('settings', {});
   if (!saved.traceV2) delete saved.zoom;   // trace redesign: default to Auto scale
   if (!saved.traceV3) delete saved.view;   // dial view added: default to it
+  if (!saved.win60) delete saved.win;      // default averaging is now 60 s (one seconds-wheel turn)
   for (const id of settingIds) if (saved[id] != null) $(id).value = saved[id];
   const num = id => parseFloat($(id).value);
 
@@ -655,7 +670,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
   function onSettings() {
     const s = {};
     for (const id of settingIds) s[id] = $(id).value;
-    s.traceV2 = true; s.traceV3 = true;
+    s.traceV2 = true; s.traceV3 = true; s.win60 = true;
     store.set('settings', s);
     $('sensVal').textContent = '×' + num('sens');
     const dial = $('view').value === 'dial';
@@ -667,6 +682,8 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
     source.configure(deviceConfig());
     dirty = true;
   }
+  $('calibre').addEventListener('change', () => { if ($('calibre').value) $('lift').value = $('calibre').value; });
+  $('lift').addEventListener('input', () => { if ($('calibre').value !== $('lift').value) $('calibre').value = ''; });
   for (const id of settingIds) $(id).addEventListener('change', onSettings);
   $('sens').addEventListener('input', () => { $('sensVal').textContent = '×' + num('sens'); });
   $('reset').onclick = () => { ana.reset(); dirty = true; };

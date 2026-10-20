@@ -115,11 +115,20 @@
       <label class="ctl">Beat rate
         <select id="bphSel"><option value="0">Auto</option></select>
       </label>
+      <label class="ctl">Calibre
+        <select id="calibre">
+          <option value="">Custom</option>
+          <option value="53">Seiko NH35 / NH36 / 4R35 / 4R36 / 7S26 (53°)</option>
+          <option value="50">ETA 2824-2 / Sellita SW200 (50°)</option>
+          <option value="50">ETA 2892-A2 (50°)</option>
+          <option value="52">Generic Swiss lever (52°)</option>
+        </select>
+      </label>
       <label class="ctl">Lift angle (°)
         <input id="lift" type="number" min="30" max="70" step="1" value="52">
       </label>
       <label class="ctl">Averaging window
-        <select id="win"><option value="10">10 s</option><option value="20" selected>20 s</option><option value="60">60 s</option><option value="120">2 min</option></select>
+        <select id="win"><option value="10">10 s</option><option value="20">20 s</option><option value="60" selected>60 s</option><option value="120">2 min</option></select>
       </label>
       <label class="ctl">Trace view
         <select id="view"><option value="dial" selected>Dial</option><option value="strip">Strip</option></select>
@@ -197,10 +206,11 @@
   $('simBph').value = 28800;
 
   // ---------------------------------------------------------------- settings
-  const settingIds = ['bphSel', 'lift', 'win', 'view', 'dialRange', 'zoom', 'sens', 'hpf', 'ppm'];
+  const settingIds = ['bphSel', 'calibre', 'lift', 'win', 'view', 'dialRange', 'zoom', 'sens', 'hpf', 'ppm'];
   const saved = store.get('settings', {});
   if (!saved.traceV2) delete saved.zoom;   // trace redesign: default to Auto scale
   if (!saved.traceV3) delete saved.view;   // dial view added: default to it
+  if (!saved.win60) delete saved.win;      // default averaging is now 60 s (one seconds-wheel turn)
   for (const id of settingIds) if (saved[id] != null) $(id).value = saved[id];
   const num = id => parseFloat($(id).value);
 
@@ -217,7 +227,7 @@
   function onSettings() {
     const s = {};
     for (const id of settingIds) s[id] = $(id).value;
-    s.traceV2 = true; s.traceV3 = true;
+    s.traceV2 = true; s.traceV3 = true; s.win60 = true;
     store.set('settings', s);
     $('sensVal').textContent = '×' + num('sens');
     const dial = $('view').value === 'dial';
@@ -229,6 +239,8 @@
     source.configure(deviceConfig());
     dirty = true;
   }
+  $('calibre').addEventListener('change', () => { if ($('calibre').value) $('lift').value = $('calibre').value; });
+  $('lift').addEventListener('input', () => { if ($('calibre').value !== $('lift').value) $('calibre').value = ''; });
   for (const id of settingIds) $(id).addEventListener('change', onSettings);
   $('sens').addEventListener('input', () => { $('sensVal').textContent = '×' + num('sens'); });
   $('reset').onclick = () => { ana.reset(); dirty = true; };

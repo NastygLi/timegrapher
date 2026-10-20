@@ -278,15 +278,20 @@
       if (!this.bph) return info;
       const T = this.period;
 
-      // Timing reference is the unlock (A), the first sound of the tick. When
-      // A is too quiet to cross the threshold, the trigger fires on the louder
-      // drop (C) instead; such ticks show their strongest burst right at the
-      // trigger. Learn the usual trigger-to-strongest-burst gap from clean ticks
-      // and offer the shifted-back time as the preferred candidate.
+      // Timing reference is the unlock (A), the first sound of the tick. A quiet
+      // A doesn't always cross the threshold, so the trigger can land on a later
+      // burst (impulse B or drop C). The strongest burst (normally C) is caught
+      // every time, so learn the usual trigger-to-strongest gap from ticks that
+      // did trigger on A, and when a tick's gap is shorter than that, the trigger
+      // was late: place it at (strongest burst - usual gap) instead.
       const so = strongestBurstOffset(tick.env, tick.pre) / this.opts.fs;
-      if (so > 0.003) { this.acGaps.push(so); if (this.acGaps.length > 60) this.acGaps.shift(); }
+      const gap = this.acGaps.length >= 5 ? median(this.acGaps) : null;
+      if (so > 0.003 && (gap == null || Math.abs(so - gap) < 0.0015)) {
+        this.acGaps.push(so);
+        if (this.acGaps.length > 60) this.acGaps.shift();
+      }
       const cands = [tTrig];
-      if (so < 0.0015 && this.acGaps.length >= 5) cands.unshift(tTrig - median(this.acGaps) / (1 + this.opts.ppm * 1e-6));
+      if (gap != null && gap - so > 0.0015) cands.unshift(tTrig - (gap - so) / (1 + this.opts.ppm * 1e-6));
 
       let n, t = cands[0];
       if (!this.run.length) n = 0;
@@ -300,7 +305,7 @@
             // predict this beat from the fit (period, phase, tick/tock offset)
             n = f.n0 + Math.round((c - f.t0 - f.a - f.c / 2) / f.b);
             const pred = f.t0 + f.a + f.b * (n - f.n0) + f.c * (n & 1);
-            const tol = Math.min(0.008, Math.max(0.003, 6 * f.jitterMs / 1000));
+            const tol = Math.min(0.004, Math.max(0.002, 6 * f.jitterMs / 1000));
             ok = n > last.n && Math.abs(c - pred) <= tol;
           } else {
             const r = Math.round((c - last.t) / T);
