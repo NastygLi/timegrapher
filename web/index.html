@@ -82,7 +82,7 @@
     <div class="legend">
       <span><span class="sw" style="background:var(--even)"></span>tick</span>
       <span><span class="sw" style="background:var(--odd)"></span>tock</span>
-      <span>Lines lean right when the watch runs fast; the gap between them is beat error.</span>
+      <span>Each dot is a beat, newest on the right. A level line is on time; rising means gaining (fast), falling means losing (slow). The gap between the two lines is beat error.</span>
     </div>
   </section>
 
@@ -116,8 +116,8 @@
       <label class="ctl">Averaging window
         <select id="win"><option value="10">10 s</option><option value="20" selected>20 s</option><option value="60">60 s</option><option value="120">2 min</option></select>
       </label>
-      <label class="ctl">Trace width
-        <select id="zoom"><option value="2">±1 ms</option><option value="5">±2.5 ms</option><option value="10" selected>±5 ms</option><option value="20">±10 ms</option><option value="50">±25 ms</option></select>
+      <label class="ctl">Trace scale
+        <select id="zoom"><option value="auto" selected>Auto</option><option value="2">±1 ms</option><option value="5">±2.5 ms</option><option value="10">±5 ms</option><option value="20">±10 ms</option><option value="50">±25 ms</option></select>
       </label>
       <label class="ctl">Sensitivity <span id="sensVal"></span>
         <input id="sens" type="range" min="2" max="30" step="0.5" value="6">
@@ -188,6 +188,7 @@
   // ---------------------------------------------------------------- settings
   const settingIds = ['bphSel', 'lift', 'win', 'zoom', 'sens', 'hpf', 'ppm'];
   const saved = store.get('settings', {});
+  if (!saved.traceV2) delete saved.zoom;   // trace redesign: default to Auto scale
   for (const id of settingIds) if (saved[id] != null) $(id).value = saved[id];
   const num = id => parseFloat($(id).value);
 
@@ -204,6 +205,7 @@
   function onSettings() {
     const s = {};
     for (const id of settingIds) s[id] = $(id).value;
+    s.traceV2 = true;
     store.set('settings', s);
     $('sensVal').textContent = '×' + num('sens');
     ana.setOptions({ liftAngle: num('lift'), bph: num('bphSel'), ppm: num('ppm') || 0, windowSec: num('win') });
@@ -388,23 +390,18 @@
     }
   }
 
+  // Timegrapher trace, drawn like a bench timegrapher or Watch Accuracy Meter:
+  // each dot is one beat, newest on the right; height is how early (up = gaining)
+  // or late (down = losing) the beat came against a perfect clock. A level line
+  // is on time; the gap between tick and tock lines is beat error. The view is
+  // centred on the visible dots so they stay in the middle.
   function drawTrace() {
     const { g, w, h } = fit($('trace'));
     g.clearRect(0, 0, w, h);
-    const span = num('zoom') / 1000;   // seconds across the full width
-    const rowPx = 2;
-    const rows = Math.floor(h / rowPx);
-    // grid
-    g.strokeStyle = C.line; g.fillStyle = C.muted; g.font = '10px system-ui'; g.lineWidth = 1;
-    for (let i = 0; i <= 10; i++) {
-      const x = Math.round(i / 10 * w) + 0.5;
-      g.globalAlpha = i === 5 ? 0.9 : 0.4;
-      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke();
-    }
-    g.globalAlpha = 1;
-    g.fillText(`${(-span / 2 * 1000).toFixed(1)} ms`, 4, h - 4);
-    g.textAlign = 'right'; g.fillText(`+${(span / 2 * 1000).toFixed(1)} ms`, w - 4, h - 4); g.textAlign = 'left';
     const tr = ana.trace;
+    const left = 52, right = 8, pxPerBeat = 2;
+    const beats = Math.floor((w - left - right) / pxPerBeat);
+    g.font = '10px system-ui';
     if (!tr.length) {
       g.fillStyle = C.muted; g.textAlign = 'center'; g.font = '13px system-ui';
       g.fillText(ana.bph ? 'Waiting for steady ticks…' : 'Place the watch on the microphone', w / 2, h / 2);
@@ -412,14 +409,52 @@
       return;
     }
     const newest = tr[tr.length - 1].row;
+    const vis = [];
+    for (let i = tr.length - 1; i >= 0 && newest - tr[i].row <= beats; i--) vis.push(tr[i]);
+    const dev = p => -p.x * 1000;   // ms; positive = beat came early = gaining
+    const center = TG.median(vis.map(dev));
+    const zoom = $('zoom').value;
+    let half;
+    if (zoom === 'auto') {
+      let m = 0;
+      for (const p of vis) m = Math.max(m, Math.abs(dev(p) - center));
+      half = [0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100].find(v => v >= m * 1.15) || 100;
+    } else half = parseFloat(zoom) / 2;
+    const plotH = h - 16, midY = 8 + plotH / 2;
+    const Y = d => midY - d / half * (plotH / 2);
+    const X = row => w - right - (newest - row) * pxPerBeat;
+
+    // horizontal grid in ms
+    const step = half <= 1 ? 0.25 : half <= 2.5 ? 0.5 : half <= 5 ? 1 : half <= 10 ? 2 : half <= 25 ? 5 : 10;
+    g.textAlign = 'right';
+    for (let v = -half; v <= half + 1e-9; v += step) {
+      const y = Math.round(Y(v)) + 0.5;
+      g.strokeStyle = C.line; g.globalAlpha = Math.abs(v) < 1e-9 ? 1 : 0.45;
+      g.beginPath(); g.moveTo(left, y); g.lineTo(w - right, y); g.stroke();
+      g.globalAlpha = 1; g.fillStyle = C.muted;
+      g.fillText(Math.abs(v) < 1e-9 ? '0 ms' : (v > 0 ? '+' : '') + parseFloat(v.toFixed(2)) + ' ms', left - 4, y + 3);
+    }
+    // vertical grid every 10 s
+    const beatsPer10s = ana.bph / 360;
+    g.textAlign = 'center';
+    for (let k = 1; k * beatsPer10s <= beats; k++) {
+      const x = Math.round(X(newest - k * beatsPer10s)) + 0.5;
+      g.strokeStyle = C.line; g.globalAlpha = 0.35;
+      g.beginPath(); g.moveTo(x, 8); g.lineTo(x, h - 8); g.stroke();
+      g.globalAlpha = 1; g.fillStyle = C.muted;
+      g.fillText(`−${k * 10}s`, x, h - 1);
+    }
+    g.textAlign = 'right'; g.fillStyle = C.muted;
+    g.fillText('fast ↑', w - right - 2, 18);
+    g.fillText('slow ↓', w - right - 2, h - 12);
+    g.textAlign = 'left';
+
     const r = 1.6;
-    for (let i = tr.length - 1; i >= 0; i--) {
-      const p = tr[i], age = newest - p.row;
-      if (age > rows) break;
-      let x = ((p.x + span / 2) % span + span) % span;   // wrap into [0, span)
-      const px = x / span * w, py = h - 2 - age * rowPx;
+    for (const p of vis) {
+      let d = dev(p) - center;
+      if (zoom !== 'auto') d = ((d + half) % (2 * half) + 2 * half) % (2 * half) - half;   // wrap like paper
       g.fillStyle = p.p ? C.odd : C.even;
-      g.fillRect(px - r, py - r, r * 2, r * 2);
+      g.fillRect(X(p.row) - r, Y(d) - r, r * 2, r * 2);
     }
   }
 

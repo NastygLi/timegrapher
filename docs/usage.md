@@ -32,21 +32,21 @@ The small text under each readout shows extra detail:
 
 ### Trace
 
-This is the classic timegrapher paper strip. Each dot is one beat, plotted
-against a perfect clock: tick in blue, tock in pink. New beats appear at the bottom.
+This is the timegrapher trace, drawn like a bench timegrapher. Each dot is one beat: tick in
+blue, tock in pink. The newest beat is on the right, and the last minute or so is shown. Height
+shows how early or late each beat came compared with a perfect clock, in milliseconds.
 
-- **Vertical lines** mean the rate is perfect.
-- **Lines leaning right** mean the watch is fast; **leaning left** means slow.
-  The steeper the lean, the bigger the error.
-- **Two separate lines** mean beat error; the gap between them is the beat
-  error. One merged line means zero beat error.
-- **Scattered dots** mean noise or a weak signal. Improve mic contact, or raise
-  sensitivity.
-- **Wavy lines** can show a real issue, such as a poised balance or escape
-  wheel problem, but check the mounting first.
+- **A level line** means the watch is on time.
+- **A rising line** means it's gaining (fast); **a falling line** means it's losing (slow).
+  The steeper the slope, the bigger the error.
+- **Two parallel lines** mean beat error; the vertical gap between them is the beat error.
+  One merged line means zero beat error.
+- **Scattered dots** mean noise or a weak signal. Improve the mic contact.
+- **Wavy lines** can show a real issue, such as a poised balance or escape wheel problem,
+  but check the mounting first.
 
-Lines that drift off one edge reappear on the other. Change **Trace width** to
-zoom.
+The view stays centred on the visible dots. **Trace scale** set to *Auto* zooms to fit
+them; a fixed scale wraps dots that run off the top or bottom, like timegrapher paper.
 
 ### Last tick
 
@@ -68,7 +68,7 @@ or for comparing before and after an adjustment.
 | **Beat rate** | *Auto* detects it; pick a value if detection is wrong. Auto can lock onto half the real rate when every second tick is missed. |
 | **Lift angle** | Property of the movement, used only for amplitude. Most modern movements are 50–53° (ETA 2824: 50°, many Seiko: 53°, Miyota 8215: 50°, older ETA/Unitas: 52°). Look up your calibre. A wrong lift angle scales amplitude proportionally. |
 | **Averaging window** | Seconds of beats used for rate and beat error. A longer window is steadier but slower to react. |
-| **Trace width** | Horizontal span of the trace. |
+| **Trace scale** | Vertical range of the trace. *Auto* fits the visible dots. |
 | **Sensitivity** | Trigger threshold as a multiple of the noise floor. Lower it for quiet watches; raise it if room noise causes false triggers. |
 | **High-pass filter** | Cuts low-frequency noise (hum, handling, desk thumps). The default is 2 kHz; try 1 kHz if ticks are dull or weak. |
 | **Clock correction** | Compensates for the Pico crystal's error; see below. |
