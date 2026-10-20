@@ -4,7 +4,7 @@ const TG = require('../web/analysis.js');
 
 function simulate(watchOpts, seconds, anaOpts = {}) {
   const w = new TG.SyntheticWatch(watchOpts);
-  const d = new TG.Detector(48000);
+  const d = new TG.Detector(48000, { refractoryMs: 25 });
   const a = new TG.Analyzer(anaOpts);
   const block = 512;
   let ticks = 0;
@@ -27,6 +27,9 @@ const cases = [
   { bph: 18000, rate: 30, beatErrorMs: 0.2, amplitude: 200 },
   { bph: 36000, rate: -2, beatErrorMs: 0.4, amplitude: 300 },
   { bph: 28800, rate: 8, beatErrorMs: 1.0, amplitude: 260, missProb: 0.1, noise: 0.002 },
+  // like the first real watch tested: stray clicks between beats, and the
+  // unlock sometimes too quiet so the trigger fires on the drop instead
+  { bph: 21600, rate: 5, beatErrorMs: 0.4, amplitude: 215, strayPerSec: 1.5, quietAProb: 0.15 },
 ];
 for (const c of cases) {
   console.log(`\n-- ${JSON.stringify(c)}`);

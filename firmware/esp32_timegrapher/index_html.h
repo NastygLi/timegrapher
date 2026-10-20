@@ -358,6 +358,16 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
     return { amp, aIdx: a, cIdx: c, dt };
   }
 
+  // Samples from the trigger to the start of the strongest burst in a snapshot.
+  function strongestBurstOffset(env, pre) {
+    let pk = 0;
+    for (let i = 1; i < env.length; i++) if (env[i] > env[pk]) pk = i;
+    let j = pk;
+    const lim = 0.3 * env[pk];
+    while (j > 0 && env[j - 1] <= env[j] && env[j - 1] > lim) j--;
+    return j - pre;
+  }
+
   // ------------------------------------------------------------ least squares
   // Fit t = a + b*n + c*parity(n). b is the measured beat period; c is the
   // offset of odd beats from the even-beat grid, which is the beat error.
@@ -371,7 +381,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
     const s = solve3(M, v);
     if (!s) return null;
     const res = pts.map(p => p.t - t0 - (s[0] + s[1] * (p.n - n0) + s[2] * p.p));
-    return { a: s[0], b: s[1], c: s[2], res };
+    return { a: s[0], b: s[1], c: s[2], res, t0, n0 };
   }
 
   function solve3(M, v) {
@@ -404,6 +414,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       this.trace = [];         // {row, x (s, residual vs nominal grid), p}
       this.row = 0;
       this.rejects = 0;
+      this.acGaps = [];        // trigger -> strongest burst gaps of clean ticks (s)
       this.result = null;
       this.history = [];       // {t, rate, be, amp}
       this.lastTick = null;
@@ -422,9 +433,9 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
     // {t, n, parity, amp, rejected} for display.
     addTick(tick) {
       const fs = this.opts.fs * (1 + this.opts.ppm * 1e-6);
-      const t = tick.onset / fs;
+      const tTrig = tick.onset / fs;
       this.ticksSeen++;
-      this.recent.push(t);
+      this.recent.push(tTrig);
       if (this.recent.length > 41) this.recent.shift();
 
       if (!this.opts.bph && (this.recent.length >= 9) && (!this.bph || this.ticksSeen % 20 === 0)) {
@@ -433,28 +444,58 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
         const b = detectBph(iv);
         if (b && b !== this.bph) { this.bph = b; this.newRun(); this.trace = []; this.history = []; }
       }
-      const info = { ...tick, t, n: null, parity: null, amp: null, rejected: false };
+      const info = { ...tick, t: tTrig, n: null, parity: null, amp: null, rejected: false, late: false };
       this.lastTick = info;
       if (!this.bph) return info;
       const T = this.period;
 
-      const am = measureAmplitude(tick.env, tick.pre, this.opts.fs, this.bph, this.opts.liftAngle);
-      if (am) Object.assign(info, { amp: am.amp, aIdx: am.aIdx, cIdx: am.cIdx });
+      // Timing reference is the unlock (A), the first sound of the tick. When
+      // A is too quiet to cross the threshold, the trigger fires on the louder
+      // drop (C) instead; such ticks show their strongest burst right at the
+      // trigger. Learn the usual trigger-to-strongest-burst gap from clean ticks
+      // and offer the shifted-back time as the preferred candidate.
+      const so = strongestBurstOffset(tick.env, tick.pre) / this.opts.fs;
+      if (so > 0.003) { this.acGaps.push(so); if (this.acGaps.length > 60) this.acGaps.shift(); }
+      const cands = [tTrig];
+      if (so < 0.0015 && this.acGaps.length >= 5) cands.unshift(tTrig - median(this.acGaps) / (1 + this.opts.ppm * 1e-6));
 
-      let n;
+      let n, t = cands[0];
       if (!this.run.length) n = 0;
       else {
-        // predict from the fitted period if we have one, else the nominal one
         const last = this.run[this.run.length - 1];
-        const Tp = this.result ? this.result.period : T;
-        const k = (t - last.t) / Tp, r = Math.round(k);
-        if (r < 1 || Math.abs(k - r) > 0.2) {
+        const f = this.result;
+        const locked = f && f.count >= 20 && f.jitterMs < 2;
+        let ok = false;
+        for (const c of cands) {
+          if (locked) {
+            // predict this beat from the fit (period, phase, tick/tock offset)
+            n = f.n0 + Math.round((c - f.t0 - f.a - f.c / 2) / f.b);
+            const pred = f.t0 + f.a + f.b * (n - f.n0) + f.c * (n & 1);
+            const tol = Math.min(0.008, Math.max(0.003, 6 * f.jitterMs / 1000));
+            ok = n > last.n && Math.abs(c - pred) <= tol;
+          } else {
+            const r = Math.round((c - last.t) / T);
+            n = last.n + r;
+            ok = r >= 1 && r <= 6 && Math.abs(c - last.t - r * T) <= Math.max(0.006, 0.04 * T);
+          }
+          if (ok) { t = c; break; }
+        }
+        if (!ok) {
           info.rejected = true;
-          if (++this.rejects >= 4) { this.newRun(); n = 0; info.rejected = false; }
+          this.rejects++;
+          // a run that never got going was probably seeded by a stray click;
+          // one with nothing usable for a while has lost the watch. Start over.
+          if (this.run.length < 4 || tTrig - last.t > 6 * T) { this.newRun(); n = 0; t = cands[0]; info.rejected = false; }
           else return info;
-        } else n = last.n + r;
+        }
       }
-      if (n === undefined) n = 0;
+      info.t = t;
+      info.late = t !== tTrig;
+      // amplitude needs the A burst in the snapshot, which late triggers lack
+      if (!info.late) {
+        const am = measureAmplitude(tick.env, tick.pre, this.opts.fs, this.bph, this.opts.liftAngle);
+        if (am) Object.assign(info, { amp: am.amp, aIdx: am.aIdx, cIdx: am.cIdx });
+      }
       this.rejects = 0;
       const p = n & 1;
       if (!this.run.length) { this.t0 = t; this.rowBase = this.row; }
@@ -471,6 +512,9 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       if (cut) this.run.splice(0, cut);
 
       this.result = this.compute();
+      // A run that has plenty of beats but still doesn't fit a clean rhythm
+      // has mixed in stray clicks (often seeded by one after a disturbance).
+      if (this.result && this.result.count >= 12 && this.result.jitterMs > 2) { this.newRun(); this.result = null; }
       if (this.result) this.history.push({ t, rate: this.result.rate, be: this.result.beatError, amp: this.result.amp });
       if (this.history.length > 5000) this.history.shift();
       return info;
@@ -493,6 +537,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       const ampOdd = pts.filter(x => x.p && x.amp != null).map(x => x.amp);
       return {
         bph: this.bph, period: fit.b, rate,
+        t0: fit.t0, n0: fit.n0, a: fit.a, b: fit.b, c: fit.c,
         beatError: Math.abs(fit.c) * 1000,
         amp: amps.length >= 3 ? median(amps) : null,
         ampEven: ampEven.length ? median(ampEven) : null,
@@ -511,6 +556,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       this.o = Object.assign({
         fs: 48000, bph: 28800, rate: 5, beatErrorMs: 0.6, amplitude: 275, lift: 52,
         level: 0.05, noise: 0.0004, hum: 0.02, jitterUs: 15, missProb: 0, clockPpm: 0,
+        quietAProb: 0, strayPerSec: 0,   // unlock too quiet to trigger; random loud clicks between beats
       }, o);
       this.idx = 0; this.beat = 0; this.events = [];
       this.seed = 12345;
@@ -529,7 +575,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       if (this.rnd() < o.missProb) { this.nextAt = (tt + T * 0.5) * fsEff; this.pendingBursts = []; return; }
       this.nextAt = tt * fsEff;
       this.pendingBursts = [
-        { at: tt, a: 0.35, fr: 4500 + 1500 * this.rnd(), tau: 0.0004 },
+        { at: tt, a: this.rnd() < o.quietAProb ? 0.01 : 0.35, fr: 4500 + 1500 * this.rnd(), tau: 0.0004 },
         { at: tt + dt * 0.45, a: 0.55, fr: 3500 + 1500 * this.rnd(), tau: 0.0005 },
         { at: tt + dt, a: 1.0, fr: 5000 + 2000 * this.rnd(), tau: 0.0007 },
       ].map(b => ({ ...b, at: b.at * fsEff, tau: b.tau * fsEff, w: 2 * Math.PI * b.fr / fsEff }));
@@ -539,6 +585,8 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       for (let i = 0; i < n; i++) {
         const s = this.idx + i;
         if (s >= this.nextAt - 1) { for (const b of this.pendingBursts) this.events.push(b); this.scheduleNext(); }
+        if (o.strayPerSec && this.rnd() < o.strayPerSec / o.fs)
+          this.events.push({ at: s, a: 0.3 + 0.7 * this.rnd(), w: 2 * Math.PI * (3000 + 4000 * this.rnd()) / o.fs, tau: 0.0006 * o.fs });
         let x = this.gauss() * o.noise + o.hum * Math.sin(2 * Math.PI * 50 * s / o.fs);
         for (const b of this.events) {
           const d = s - b.at;
@@ -586,7 +634,10 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
 
   function deviceConfig() {
     const T = ana.period;
-    return { sens: num('sens'), hpf: num('hpf'), refractoryMs: T ? Math.max(30, T * 600) : 40 };
+    // Lock out only for the length of one tick's sound (A to C, ~10-35 ms), not
+    // most of a beat: a stray click must not hide the next real tick. Strays
+    // that do get through are rejected by the analyzer's phase lock.
+    return { sens: num('sens'), hpf: num('hpf'), refractoryMs: T ? Math.min(45, Math.max(25, T * 250)) : 40 };
   }
   function onSettings() {
     const s = {};

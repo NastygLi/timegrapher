@@ -196,7 +196,10 @@
 
   function deviceConfig() {
     const T = ana.period;
-    return { sens: num('sens'), hpf: num('hpf'), refractoryMs: T ? Math.max(30, T * 600) : 40 };
+    // Lock out only for the length of one tick's sound (A to C, ~10-35 ms), not
+    // most of a beat: a stray click must not hide the next real tick. Strays
+    // that do get through are rejected by the analyzer's phase lock.
+    return { sens: num('sens'), hpf: num('hpf'), refractoryMs: T ? Math.min(45, Math.max(25, T * 250)) : 40 };
   }
   function onSettings() {
     const s = {};
