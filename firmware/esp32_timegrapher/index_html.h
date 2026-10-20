@@ -123,6 +123,9 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
           <option value="53">Seiko NH35 / NH36 / 4R35 / 4R36 / 7S26 (53°)</option>
           <option value="50">ETA 2824-2 / Sellita SW200 (50°)</option>
           <option value="50">ETA 2892-A2 (50°)</option>
+          <option value="50">Hamilton H-10 / ETA C07 / Powermatic 80 (50°)</option>
+          <option value="49">Miyota 8215 / 82xx (49°)</option>
+          <option value="51">Miyota 9015 / 90xx (51°)</option>
           <option value="52">Generic Swiss lever (52°)</option>
         </select>
       </label>
