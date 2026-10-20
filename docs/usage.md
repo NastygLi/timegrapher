@@ -32,7 +32,22 @@ The small text under each readout shows extra detail:
 
 ### Trace
 
-This is the timegrapher trace, drawn like a bench timegrapher. Each dot is one beat: tick in
+There are two views, chosen with **Trace view**.
+
+**Dial** (default) works like the *Watch Accuracy Meter* app. On a cream "paper" background, the
+trace grows up from a pivot at the bottom, newest beat at the pivot, and acts like a needle
+pointing at the rate on the arc scale:
+
+- **Straight up** means the watch is on time. **Leaning right** means it's gaining; **leaning left**
+  means it's losing. Read the rate where the line meets the arc.
+- **The zig-zag width** shows beat error (tick and tock land on two slightly different lines).
+- The black **pointer** on the arc marks the measured rate. The **Δ bracket** under it shows how
+  much the rate varied over the averaging window; a small Δ means a steady reading.
+- **Dial range** sets the scale at the edges of the fan: ±10, ±25, ±50 or ±100 s/d.
+
+**Strip** is a scrolling chart:
+
+Each dot is one beat: tick in
 blue, tock in pink. The newest beat is on the right, and the last minute or so is shown. Height
 shows how early or late each beat came compared with a perfect clock, in milliseconds.
 
@@ -68,7 +83,9 @@ or for comparing before and after an adjustment.
 | **Beat rate** | *Auto* detects it; pick a value if detection is wrong. Auto can lock onto half the real rate when every second tick is missed. |
 | **Lift angle** | Property of the movement, used only for amplitude. Most modern movements are 50–53° (ETA 2824: 50°, many Seiko: 53°, Miyota 8215: 50°, older ETA/Unitas: 52°). Look up your calibre. A wrong lift angle scales amplitude proportionally. |
 | **Averaging window** | Seconds of beats used for rate and beat error. A longer window is steadier but slower to react. |
-| **Trace scale** | Vertical range of the trace. *Auto* fits the visible dots. |
+| **Trace view** | *Dial* (like Watch Accuracy Meter) or *Strip* (scrolling chart). |
+| **Dial range** | Rate at the edges of the dial's fan. |
+| **Trace scale** | Vertical range of the strip view. *Auto* fits the visible dots. |
 | **Sensitivity** | Trigger threshold as a multiple of the noise floor. Lower it for quiet watches; raise it if room noise causes false triggers. |
 | **High-pass filter** | Cuts low-frequency noise (hum, handling, desk thumps). The default is 2 kHz; try 1 kHz if ticks are dull or weak. |
 | **Clock correction** | Compensates for the Pico crystal's error; see below. |

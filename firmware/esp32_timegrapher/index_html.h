@@ -30,6 +30,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
   .grid2 { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
   canvas { width: 100%; display: block; border-radius: 6px; background: #0a0d12; }
   #trace { height: 340px; }
+  #trace.dial { height: 520px; }
   #wave { height: 150px; }
   #hist { height: 150px; }
   .controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 14px; }
@@ -57,6 +58,7 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
     th, td { padding: 5px 3px; font-size: 12px; }
     .ro .value { font-size: 28px; }
     #trace { height: 280px; }
+    #trace.dial { height: 400px; }
   }
 </style>
 </head>
@@ -81,7 +83,10 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
   <section class="panel">
     <h2>Trace</h2>
     <canvas id="trace"></canvas>
-    <div class="legend">
+    <div class="legend" id="dialLegend">
+      <span>The trace grows up from the pivot like a needle and points at the rate on the scale: straight up is on time, leaning right is gaining, left is losing. The zig-zag width is beat error.</span>
+    </div>
+    <div class="legend" id="traceLegend">
       <span><span class="sw" style="background:var(--even)"></span>tick</span>
       <span><span class="sw" style="background:var(--odd)"></span>tock</span>
       <span>Each dot is a beat, newest on the right. A level line is on time; rising means gaining (fast), falling means losing (slow). The gap between the two lines is beat error.</span>
@@ -118,7 +123,13 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
       <label class="ctl">Averaging window
         <select id="win"><option value="10">10 s</option><option value="20" selected>20 s</option><option value="60">60 s</option><option value="120">2 min</option></select>
       </label>
-      <label class="ctl">Trace scale
+      <label class="ctl">Trace view
+        <select id="view"><option value="dial" selected>Dial</option><option value="strip">Strip</option></select>
+      </label>
+      <label class="ctl" id="dialRangeCtl">Dial range
+        <select id="dialRange"><option value="10">±10 s/d</option><option value="25">±25 s/d</option><option value="50" selected>±50 s/d</option><option value="100">±100 s/d</option></select>
+      </label>
+      <label class="ctl" id="zoomCtl">Trace scale
         <select id="zoom"><option value="auto" selected>Auto</option><option value="2">±1 ms</option><option value="5">±2.5 ms</option><option value="10">±5 ms</option><option value="20">±10 ms</option><option value="50">±25 ms</option></select>
       </label>
       <label class="ctl">Sensitivity <span id="sensVal"></span>
@@ -624,9 +635,10 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
   $('simBph').value = 28800;
 
   // ---------------------------------------------------------------- settings
-  const settingIds = ['bphSel', 'lift', 'win', 'zoom', 'sens', 'hpf', 'ppm'];
+  const settingIds = ['bphSel', 'lift', 'win', 'view', 'dialRange', 'zoom', 'sens', 'hpf', 'ppm'];
   const saved = store.get('settings', {});
   if (!saved.traceV2) delete saved.zoom;   // trace redesign: default to Auto scale
+  if (!saved.traceV3) delete saved.view;   // dial view added: default to it
   for (const id of settingIds) if (saved[id] != null) $(id).value = saved[id];
   const num = id => parseFloat($(id).value);
 
@@ -643,9 +655,14 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
   function onSettings() {
     const s = {};
     for (const id of settingIds) s[id] = $(id).value;
-    s.traceV2 = true;
+    s.traceV2 = true; s.traceV3 = true;
     store.set('settings', s);
     $('sensVal').textContent = '×' + num('sens');
+    const dial = $('view').value === 'dial';
+    $('dialRangeCtl').style.display = dial ? '' : 'none';
+    $('zoomCtl').style.display = dial ? 'none' : '';
+    $('traceLegend').style.display = dial ? 'none' : '';
+    $('dialLegend').style.display = dial ? '' : 'none';
     ana.setOptions({ liftAngle: num('lift'), bph: num('bphSel'), ppm: num('ppm') || 0, windowSec: num('win') });
     source.configure(deviceConfig());
     dirty = true;
@@ -834,6 +851,124 @@ static const char INDEX_HTML[] = R"TGHTML(<!doctype html>
   // is on time; the gap between tick and tock lines is beat error. The view is
   // centred on the visible dots so they stay in the middle.
   function drawTrace() {
+    const dial = $('view').value === 'dial';
+    $('trace').classList.toggle('dial', dial);
+    if (dial) drawDial(); else drawStrip();
+  }
+
+  // Dial view, after Watch Accuracy Meter: on cream "paper", the trace grows up
+  // from a pivot at the bottom (newest beat) towards older beats. Horizontal
+  // offset is accumulated timing error, vertical is age, scaled so the line's
+  // angle reads the rate on the arc: straight up = on time, right = gaining.
+  function drawDial() {
+    const { g, w, h } = fit($('trace'));
+    const P = { paper: '#fbf3d6', dots: '#d8cda5', ink: '#2a2a2a', faint: '#8a8170', tick: '#c0392b', tock: '#7b1f16', pointer: '#111' };
+    g.fillStyle = P.paper; g.fillRect(0, 0, w, h);
+    g.fillStyle = P.dots;
+    for (let y = 6; y < h; y += 12) for (let x = 6; x < w; x += 12) g.fillRect(x, y, 1, 1);
+
+    const range = num('dialRange');               // s/d at the fan edges
+    const half = 35 * Math.PI / 180, tanH = Math.tan(half);
+    const px = w / 2, py = h - 22;                // pivot
+    const R = Math.min(py - 46, (w / 2 - 34) / Math.sin(half));
+    const angleOf = r => Math.atan(Math.max(-1.6, Math.min(1.6, r / range)) * tanH);
+    const at = (ang, rad) => [px + rad * Math.sin(ang), py - rad * Math.cos(ang)];
+
+    // fan edges and arc scale
+    g.strokeStyle = P.ink; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(...at(-half, R)); g.lineTo(px, py); g.lineTo(...at(half, R)); g.stroke();
+    g.beginPath(); g.arc(px, py, R, -Math.PI / 2 - half, -Math.PI / 2 + half); g.stroke();
+    const minor = range / 25, major = range / 5;
+    g.font = '600 13px system-ui'; g.textAlign = 'center'; g.fillStyle = P.ink;
+    for (let v = -range; v <= range + 1e-9; v += minor) {
+      const isMajor = Math.abs(v / major - Math.round(v / major)) < 1e-6;
+      const a = angleOf(v), [x1, y1] = at(a, R), [x2, y2] = at(a, R + (isMajor ? 12 : 7));
+      g.lineWidth = isMajor ? 1.5 : 1;
+      g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+      if (isMajor) { const [lx, ly] = at(a, R + 24); g.fillText((v > 0 ? '+' : '') + Math.round(v), lx, ly + 4); }
+    }
+
+    const tr = ana.trace, rowBase = ana.rowBase;
+    const run = rowBase == null ? [] : tr.filter(p => p.row >= rowBase);
+    const r = ana.result;
+
+    // readouts inside the fan
+    const lines = [
+      ['BPH', ana.bph ? String(ana.bph) : '—', num('bphSel') ? '' : 'AUTO'],
+      ['Rate', r ? fmt(r.rate, 0, true) : '—', 's/d'],
+      ['Beat Error', r ? fmt(r.beatError, 1) : '—', 'ms'],
+      [`Ampl.(${ana.opts.liftAngle}°)`, r && r.amp ? fmt(r.amp, 0) : '—', '°'],
+    ];
+    const ty = py - R * 0.62, lh = Math.min(26, R * 0.09);
+    lines.forEach(([k, v, u], i) => {
+      const y = ty + i * lh;
+      g.textAlign = 'left'; g.fillStyle = P.ink; g.font = `${Math.round(lh * 0.72)}px system-ui`;
+      g.fillText(k, px - lh * 7, y);
+      g.textAlign = 'right'; g.font = `600 ${Math.round(lh * 0.8)}px ui-monospace, Menlo, monospace`;
+      g.fillText(v, px + lh * 3.6, y);
+      g.textAlign = 'left'; g.font = `${Math.round(lh * 0.62)}px system-ui`;
+      g.fillText(u, px + lh * 3.9, y);
+    });
+
+    // trace: x = timing error relative to the newest beat (mid tick/tock),
+    // y = age of the beat; ky/kx chosen so the angle reads on the arc
+    if (run.length > 1 && ana.bph) {
+      const T = 3600 / ana.bph, newest = run[run.length - 1];
+      const visSec = 30, ky = (py - 4) / visSec;                       // px per second of age
+      const kx = tanH * ky / (range / 86400 * 1000);                   // px per ms of error
+      const dev = p => -p.x * 1000;                                    // ms, + = early = gaining
+      let lastE = null, lastO = null;
+      for (let i = run.length - 1; i >= 0 && (lastE == null || lastO == null); i--) {
+        if (run[i].p && lastO == null) lastO = dev(run[i]);
+        if (!run[i].p && lastE == null) lastE = dev(run[i]);
+      }
+      const ref = ((lastE ?? lastO) + (lastO ?? lastE)) / 2;
+      g.save();
+      g.beginPath(); g.rect(0, 0, w, py + 2); g.clip();
+      g.strokeStyle = P.tick; g.lineWidth = 1; g.globalAlpha = 0.55; g.beginPath();
+      const pts = [];
+      for (let i = run.length - 1; i >= 0; i--) {
+        const p = run[i], age = (newest.row - p.row) * T;
+        if (age > visSec) break;
+        const x = px + (ref - dev(p)) * kx, y = py - age * ky;
+        pts.push([x, y, p.p]);
+        i === run.length - 1 ? g.moveTo(x, y) : g.lineTo(x, y);
+      }
+      g.stroke(); g.globalAlpha = 1;
+      for (const [x, y, odd] of pts) {
+        g.fillStyle = odd ? P.tock : P.tick;
+        g.beginPath(); g.moveTo(x, y - 3.5); g.lineTo(x + 3, y + 2); g.lineTo(x - 3, y + 2); g.closePath(); g.fill();
+      }
+      g.restore();
+    } else {
+      g.fillStyle = P.faint; g.textAlign = 'center'; g.font = '13px system-ui';
+      g.fillText(ana.bph ? 'Waiting for steady ticks…' : 'Place the watch on the microphone', px, py - R * 0.2);
+    }
+
+    // rate pointer on the arc, and the bracket of rate variation this run
+    if (r) {
+      const a = angleOf(r.rate), [x, y] = at(a, R - 3);
+      g.save(); g.translate(x, y); g.rotate(a);
+      g.fillStyle = P.pointer; g.beginPath(); g.moveTo(0, 0); g.lineTo(-7, 14); g.lineTo(7, 14); g.closePath(); g.fill();
+      g.restore();
+      const tEnd = ana.history.length ? ana.history[ana.history.length - 1].t : 0;
+      const hs = ana.history.filter(q => q.t >= tEnd - ana.opts.windowSec);
+      if (hs.length > 5) {
+        let lo = Infinity, hi = -Infinity;
+        for (const q of hs) { lo = Math.min(lo, q.rate); hi = Math.max(hi, q.rate); }
+        const a1 = angleOf(lo), a2 = angleOf(hi), rb = R - 34;
+        g.strokeStyle = P.ink; g.lineWidth = 1.2;
+        g.beginPath(); g.moveTo(...at(a1, rb + 6)); g.lineTo(...at(a1, rb));
+        g.arc(px, py, rb, -Math.PI / 2 + a1, -Math.PI / 2 + a2); g.lineTo(...at(a2, rb + 6)); g.stroke();
+        const [lx, ly] = at((a1 + a2) / 2, rb - 16);
+        g.fillStyle = P.ink; g.textAlign = 'center'; g.font = '600 12px system-ui';
+        g.fillText('Δ ' + (hi - lo).toFixed(hi - lo < 10 ? 1 : 0), lx, ly);
+      }
+    }
+    g.textAlign = 'left';
+  }
+
+  function drawStrip() {
     const { g, w, h } = fit($('trace'));
     g.clearRect(0, 0, w, h);
     const tr = ana.trace;
