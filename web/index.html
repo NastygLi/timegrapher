@@ -118,13 +118,13 @@
       <label class="ctl">Calibre
         <select id="calibre">
           <option value="">Custom</option>
-          <option value="53">Seiko NH35 / NH36 / 4R35 / 4R36 / 7S26 (53°)</option>
-          <option value="50">ETA 2824-2 / Sellita SW200 (50°)</option>
-          <option value="50">ETA 2892-A2 (50°)</option>
-          <option value="50">Hamilton H-10 / ETA C07 / Powermatic 80 (50°)</option>
-          <option value="49">Miyota 8215 / 82xx (49°)</option>
-          <option value="51">Miyota 9015 / 90xx (51°)</option>
-          <option value="52">Generic Swiss lever (52°)</option>
+          <option value="seiko:53">Seiko NH35 / NH36 / 4R35 / 4R36 / 7S26 (53°)</option>
+          <option value="eta2824:50">ETA 2824-2 / Sellita SW200 (50°)</option>
+          <option value="eta2892:50">ETA 2892-A2 (50°)</option>
+          <option value="h10:50">Hamilton H-10 / ETA C07 / Powermatic 80 (50°)</option>
+          <option value="miyota82:49">Miyota 8215 / 82xx (49°)</option>
+          <option value="miyota90:51">Miyota 9015 / 90xx (51°)</option>
+          <option value="generic:52">Generic Swiss lever (52°)</option>
         </select>
       </label>
       <label class="ctl">Lift angle (°)
@@ -242,8 +242,10 @@
     source.configure(deviceConfig());
     dirty = true;
   }
-  $('calibre').addEventListener('change', () => { if ($('calibre').value) $('lift').value = $('calibre').value; });
-  $('lift').addEventListener('input', () => { if ($('calibre').value !== $('lift').value) $('calibre').value = ''; });
+  // calibre values are "id:liftAngle"; picking one fills the lift angle, typing one switches to Custom
+  const calLift = () => $('calibre').value.split(':')[1];
+  $('calibre').addEventListener('change', () => { if (calLift()) $('lift').value = calLift(); });
+  $('lift').addEventListener('input', () => { if (calLift() !== $('lift').value) $('calibre').value = ''; });
   for (const id of settingIds) $(id).addEventListener('change', onSettings);
   $('sens').addEventListener('input', () => { $('sensVal').textContent = '×' + num('sens'); });
   $('reset').onclick = () => { ana.reset(); dirty = true; };
